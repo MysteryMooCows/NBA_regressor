@@ -1,8 +1,11 @@
 import keras
-from keras.layers import Input, Dense
+from keras.layers import Input, Dense, Dropout
 from keras.models import Model
 import numpy as np
 import pandas as pd
+from sklearn import model_selection
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.metrics import log_loss, make_scorer
 
 
 def read_data():
@@ -58,20 +61,61 @@ def preprocess(x_df, y_df):
     return x_train, y_train, x_test, y_test
 
 
-def get_model(x_train, y_train, x_test, y_test):
-    inputs = Input(shape=(x_train.shape[1],))
-    hidden = Dense(128, activation="relu")(inputs)
+def get_model(x_shape=(6,), num_categories=2):
+    inputs = Input(shape=x_shape)
+    hidden = Dense(64, activation="relu")(inputs)
+    hidden = Dropout(0.5)(hidden)
     hidden = Dense(64, activation="relu")(hidden)
-    hidden = Dense(64, activation="relu")(hidden)
+    hidden = Dropout(0.5)(hidden)
     hidden = Dense(32, activation="relu")(hidden)
-    outputs = Dense(y_train.shape[1], activation="softmax")(hidden)
+    outputs = Dense(num_categories, activation="softmax")(hidden)
 
     model = Model(inputs=inputs, outputs=outputs)
     model.compile(optimizer="adam", loss=keras.losses.binary_crossentropy, metrics=["accuracy"], )
 
-    model.summary()
-
     return model
+
+
+def loss(y, y_pred):
+    y = np.array(y)
+    y_pred = np.array(y_pred)
+
+    loss = log_loss(y, y_pred)
+
+    return loss
+
+
+def accuracy(y, y_pred):
+    y_pred = np.round(y_pred)
+
+    y_df = pd.DataFrame(y)
+    y_pred_df = pd.DataFrame(y_pred)
+
+    y_away_series = y_df.iloc[:, 0]
+    y_pred_away_series = y_pred_df.iloc[:, 0]
+
+    value_count_table = (y_away_series == y_pred_away_series).value_counts()
+
+    print(value_count_table)
+    if (True in value_count_table):
+        accuracy = value_count_table[True] / y_away_series.size
+    else:
+        accuracy = 0
+
+    return accuracy
+
+
+class NeuralClassifier(BaseEstimator, ClassifierMixin):
+    def __init__(self):
+        self.model = get_model(x_shape=(6,), num_categories=2) # TODO: fix magic numbers
+        self.scorer = make_scorer(accuracy, greater_is_better=True) # log_loss, greater_is_better=False
+
+    def fit(self, xs, ys):
+        self.model.fit(xs, ys, epochs=12, batch_size=64, verbose=1)
+        return self
+
+    def predict(self, test_input):
+        return self.model.predict(test_input)
 
 
 if __name__ == "__main__":
@@ -79,8 +123,8 @@ if __name__ == "__main__":
     x_df, y_df = get_xy_dfs(games_df, teams_df, players_df)
     x_train, y_train, x_test, y_test = preprocess(x_df, y_df)
 
-    model = get_model(x_train, y_train, x_test, y_test)
-    model.fit(x_train, y_train, epochs=6, batch_size=64, validation_data=(x_test, y_test))
+    model = get_model(x_shape=(6,), num_categories=2)
+    model.fit(x_train, y_train, epochs=12, batch_size=64, validation_data=(x_test, y_test), verbose=0)
 
     print(model.evaluate(x_train, y_train))
 
@@ -90,5 +134,24 @@ if __name__ == "__main__":
     print(f"test_x: {test_x}")
     print(f"p(away team wins) = {test_prediction[0][0]}")
     print(f"p(home team wins) = {test_prediction[0][1]}")
+
+    print(loss(np.array([[0, 1]]), test_prediction))
+    print(accuracy(np.array([[0, 1]]), test_prediction))
+    print("Home team should be predicted to win")
+
+    keep_indices = x_df.loc[~x_df.isna().any(axis=1), :].index
+
+    x_df = x_df.loc[keep_indices, :]
+    y_df = y_df.loc[keep_indices, :]
+
+    x_array = np.array(x_df)
+    y_array = keras.utils.to_categorical(y_df, 2)
+    
+    classifier = NeuralClassifier()
+    k=10
+    cvScores = model_selection.cross_val_score(classifier, x_array, y_array, cv=k, scoring=classifier.scorer)
+    mean = np.mean(cvScores)
+    print(f"Average accuracy for k={k} is {1 * mean}")
+    
 
 
