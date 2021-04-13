@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn import model_selection
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.metrics import log_loss, make_scorer
+import matplotlib.pyplot as plt
 
 
 def read_data():
@@ -61,13 +62,13 @@ def preprocess(x_df, y_df):
     return x_train, y_train, x_test, y_test
 
 
-def get_model(x_shape=(6,), num_categories=2):
+def get_model(units, x_shape=(6,), num_categories=2):
     inputs = Input(shape=x_shape)
-    hidden = Dense(64, activation="relu")(inputs)
+    hidden = Dense(units, activation="relu")(inputs)
     hidden = Dropout(0.5)(hidden)
-    hidden = Dense(64, activation="relu")(hidden)
+    hidden = Dense(units, activation="relu")(hidden)
     hidden = Dropout(0.5)(hidden)
-    hidden = Dense(32, activation="relu")(hidden)
+    hidden = Dense(units, activation="relu")(hidden)
     outputs = Dense(num_categories, activation="softmax")(hidden)
 
     model = Model(inputs=inputs, outputs=outputs)
@@ -96,7 +97,6 @@ def accuracy(y, y_pred):
 
     value_count_table = (y_away_series == y_pred_away_series).value_counts()
 
-    print(value_count_table)
     if (True in value_count_table):
         accuracy = value_count_table[True] / y_away_series.size
     else:
@@ -106,12 +106,13 @@ def accuracy(y, y_pred):
 
 
 class NeuralClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self):
-        self.model = get_model(x_shape=(6,), num_categories=2) # TODO: fix magic numbers
+    def __init__(self, units=32):
+        self.units = units
+        self.model = get_model(units=units, x_shape=(6,), num_categories=2) # TODO: fix magic numbers
         self.scorer = make_scorer(accuracy, greater_is_better=True) # log_loss, greater_is_better=False
 
     def fit(self, xs, ys):
-        self.model.fit(xs, ys, epochs=12, batch_size=64, verbose=1)
+        self.model.fit(xs, ys, epochs=6, batch_size=64, verbose=1)
         return self
 
     def predict(self, test_input):
@@ -123,7 +124,8 @@ if __name__ == "__main__":
     x_df, y_df = get_xy_dfs(games_df, teams_df, players_df)
     x_train, y_train, x_test, y_test = preprocess(x_df, y_df)
 
-    model = get_model(x_shape=(6,), num_categories=2)
+    '''
+    model = get_model(units=32, x_shape=(6,), num_categories=2)
     model.fit(x_train, y_train, epochs=12, batch_size=64, validation_data=(x_test, y_test), verbose=0)
 
     print(model.evaluate(x_train, y_train))
@@ -138,7 +140,7 @@ if __name__ == "__main__":
     print(loss(np.array([[0, 1]]), test_prediction))
     print(accuracy(np.array([[0, 1]]), test_prediction))
     print("Home team should be predicted to win")
-
+    '''
     keep_indices = x_df.loc[~x_df.isna().any(axis=1), :].index
 
     x_df = x_df.loc[keep_indices, :]
@@ -147,11 +149,23 @@ if __name__ == "__main__":
     x_array = np.array(x_df)
     y_array = keras.utils.to_categorical(y_df, 2)
     
-    classifier = NeuralClassifier()
-    k=10
-    cvScores = model_selection.cross_val_score(classifier, x_array, y_array, cv=k, scoring=classifier.scorer)
-    mean = np.mean(cvScores)
-    print(f"Average accuracy for k={k} is {1 * mean}")
+    def run_NN(units):
+        print(f"run_NN, units: {units}")
+        classifier = NeuralClassifier(units=units)
+        k_fold = 5
+        cvScores = model_selection.cross_val_score(classifier, x_array, y_array, cv=k_fold, scoring=classifier.scorer)
+        mean = np.mean(cvScores)
+        return mean
     
+    test_sizes = pd.Series([2 ** i for i in range(8+1)])
 
+    accuracies = test_sizes.apply(lambda units: run_NN(units))
+    print(f"accuracies:\n{accuracies}")
 
+    plt.plot(test_sizes, accuracies)
+    plt.xlabel('Units per Layer')
+    plt.ylabel('Accuracy')
+
+    plt.show()
+    
+    print(f"Best: {test_sizes.loc[accuracies.idxmax()]}")
