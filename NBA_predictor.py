@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn import model_selection
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.metrics import log_loss, make_scorer
+from sklearn.model_selection import GridSearchCV
 import matplotlib.pyplot as plt
 
 
@@ -62,17 +63,20 @@ def preprocess(x_df, y_df):
     return x_train, y_train, x_test, y_test
 
 
-def get_model(units, x_shape=(6,), num_categories=2):
+def get_model(units, hidden_layers, dropout, x_shape=(6,), num_categories=2):
     inputs = Input(shape=x_shape)
     hidden = Dense(units, activation="relu")(inputs)
-    hidden = Dropout(0.5)(hidden)
-    hidden = Dense(units, activation="relu")(hidden)
-    hidden = Dropout(0.5)(hidden)
-    hidden = Dense(units, activation="relu")(hidden)
+
+    for i in range(hidden_layers):
+        hidden = Dropout(dropout)(hidden)
+        hidden = Dense(units, activation="relu")(hidden)
+    
+    hidden = Dropout(dropout)(hidden)
     outputs = Dense(num_categories, activation="softmax")(hidden)
 
     model = Model(inputs=inputs, outputs=outputs)
-    model.compile(optimizer="adam", loss=keras.losses.binary_crossentropy, metrics=["accuracy"], )
+    model.summary()
+    model.compile(optimizer="adam", loss=keras.losses.binary_crossentropy, metrics=["accuracy"])
 
     return model
 
@@ -106,17 +110,20 @@ def accuracy(y, y_pred):
 
 
 class NeuralClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self, units=32):
+    def __init__(self, units=32, hidden_layers=2, dropout=.5):
         self.units = units
-        self.model = get_model(units=units, x_shape=(6,), num_categories=2) # TODO: fix magic numbers
+        self.hidden_layers = hidden_layers
+        self.dropout = dropout
+        self.model = None
         self.scorer = make_scorer(accuracy, greater_is_better=True) # log_loss, greater_is_better=False
 
     def fit(self, xs, ys):
-        self.model.fit(xs, ys, epochs=6, batch_size=64, verbose=1)
+        self.model = get_model(units=self.units, hidden_layers=self.hidden_layers, dropout=self.dropout, x_shape=(6,), num_categories=2)
+        self.model.fit(xs, ys, epochs=50, batch_size=128, verbose=1)
         return self
 
     def predict(self, test_input):
-        return self.model.predict(test_input)
+        return self.model.predict(test_input) # TODO preprocess predicted output to fit with built-in accuracy function
 
 
 if __name__ == "__main__":
@@ -149,6 +156,7 @@ if __name__ == "__main__":
     x_array = np.array(x_df)
     y_array = keras.utils.to_categorical(y_df, 2)
     
+    '''
     def run_NN(units):
         print(f"run_NN, units: {units}")
         classifier = NeuralClassifier(units=units)
@@ -156,12 +164,30 @@ if __name__ == "__main__":
         cvScores = model_selection.cross_val_score(classifier, x_array, y_array, cv=k_fold, scoring=classifier.scorer)
         mean = np.mean(cvScores)
         return mean
+    '''
     
-    test_sizes = pd.Series([2 ** i for i in range(8+1)])
+    parameters = [{
+        'units': [2 ** i for i in range(0, 5+1)], 
+        'hidden_layers': [i for i in range(0, 4+1)],
+        'dropout': [i/10 for i in range(0, 9+1)]}]
 
+    classifier = NeuralClassifier()
+    grid_search = GridSearchCV(
+        classifier, parameters, scoring=classifier.scorer
+    )
+
+    grid_search.fit(x_array, y_array) # TODO preprocess y_array to fit with built-in accuracy function
+    print(print(grid_search.best_params_))
+
+    results_df = pd.DataFrame(grid_search.cv_results_)
+    print(results_df)
+    results_df.to_csv("grid_search_results.csv")
+
+    '''
     accuracies = test_sizes.apply(lambda units: run_NN(units))
     print(f"accuracies:\n{accuracies}")
 
+    
     plt.plot(test_sizes, accuracies)
     plt.xlabel('Units per Layer')
     plt.ylabel('Accuracy')
@@ -169,3 +195,4 @@ if __name__ == "__main__":
     plt.show()
     
     print(f"Best: {test_sizes.loc[accuracies.idxmax()]}")
+    '''
