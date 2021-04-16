@@ -1,3 +1,6 @@
+# uses https://www.kaggle.com/nathanlauga/nba-games
+
+
 import keras
 from keras.layers import Input, Dense, Dropout
 from keras.models import Model
